@@ -6,6 +6,8 @@
 #include <Ethernet.h>
 #include <Wire.h>
 #include "SparkFun_BNO080_Arduino_Library.h"
+#include <math.h>
+#include <stdlib.h>
 
 BNO080 myIMU;
 
@@ -62,6 +64,13 @@ BNO080 myIMU;
 #define IDLE 0
 #define EXTEND 1
 #define RETRACT 2
+#define INPUT_TRIGGER 11
+
+// Assuming a maximum of 6 joints and 4 coordinates (x, y, z, w)
+#define MAX_JOINTS 6
+#define COORDINATES 4
+
+#define PI 3.14159265358979323846
 
 // Default platform calibration settings (average analog values at extrema for each actuator)
 unsigned long move_times[NUM_MOTORS];
@@ -102,13 +111,13 @@ unsigned long previous_time;        // last recorded time (in millis); measured 
 uint8_t motor;                      // used to iterate through actuators by their indexing (0 to NUM_MOTORS - 1)
 
 //IMU Variables
-float roll       = 0.0;
+float roll_imu       = 0.0;
 float roll_corr  = 0.0;
 float roll_val   = 0.0;
-float pitch      = 0.0;
+float pitch_imu      = 0.0;
 float pitch_corr = 0.0;
 float pitch_val  = 0.0;
-float yaw        = 0.0;
+float yaw_imu        = 0.0;
 float yaw_corr   = 0.0;
 float yaw_val    = 0.0;
 float X; 
@@ -116,6 +125,28 @@ float Y;
 float Z;
 byte linAccuracy;
 
+// Assuming definitions for platform_joints and base_joints as global arrays
+float yaw_current_value, pitch_current_value, roll_current_value;
+float heave_current_value, sway_current_value, surge_current_value;
+//int int_actuator_lengths[NUM_MOTORS]; // Assuming there are 6 actuators
+float rotation_matrix[3][3];
+
+float base_joints[MAX_JOINTS][COORDINATES] = {
+    {407,  -80,  0, 1},
+    {-135, -393, 0, 1},
+    {-273, -313, 0, 1},
+    {-273,  313, 0, 1},
+    {-135,  393, 0, 1},
+    {407,   80,  0, 1}
+};
+
+float platform_joints[MAX_JOINTS][COORDINATES] = 
+    {{152,  -166, 0, 1},
+     {68,   -215, 0, 1},
+     {-220, -49,  0, 1},
+     {-220,  49,  0, 1},
+     {68,    215, 0, 1},
+     {152,   166, 0, 1}};
 
 void setup() //Runs once at initialization; set up input and output pins and variables.
 { 
@@ -168,6 +199,7 @@ void setup() //Runs once at initialization; set up input and output pins and var
     Wire.setClock(400000); //Increase I2C data rate to 400kHz
     myIMU.enableRotationVector(50); //Send data update every 50ms
     myIMU.enableLinearAccelerometer(50);
+    
  }
 
 
@@ -175,11 +207,13 @@ void loop()   // Main loop. Run tasks in an infinite loop.
 {  
 
   //If there is an incoming data packet from the computer, call the readEthernet function
-  EthernetClient client = Serial.available();
-  if ( Serial.available())
+  //readSerial();
+      // Parse new serial input if enough is in the buffer (also sets desired position if input is valid)
+  if (Serial.available() >= INPUT_TRIGGER)
   {
     readSerial();
   }
+  update_platform();
   
   //Look for reports from the IMU
   if (myIMU.dataAvailable() == true)
@@ -189,13 +223,20 @@ void loop()   // Main loop. Run tasks in an infinite loop.
     Z = myIMU.getLinAccelZ();
     linAccuracy = myIMU.getLinAccelAccuracy();
 
-    pitch = (myIMU.getRoll()) * 180.0 / PI; // Convert roll to degre
-    pitch_val = pitch - pitch_corr;
-    roll = (myIMU.getPitch()) * 180.0 / PI; // Convert pitch to degrees
-    roll_val = roll - roll_corr;
-    yaw = (myIMU.getYaw()) * 180.0 / PI; // Convert yaw / heading to degrees
-    yaw_val = yaw - yaw_corr;
+    pitch_imu = (myIMU.getRoll()) * 180.0 / PI; // Convert roll to degre
+    pitch_val = pitch_imu - pitch_corr;
+    roll_imu = (myIMU.getPitch()) * 180.0 / PI; // Convert pitch to degrees
+    roll_val = roll_imu - roll_corr;
+    yaw_imu = (myIMU.getYaw()) * 180.0 / PI; // Convert yaw / heading to degrees
+    yaw_val = yaw_imu - yaw_corr;
 
+    Serial.print(pitch_val);
+    Serial.print("   ");
+    Serial.print(roll_val);
+    Serial.print("   ");
+    Serial.print(yaw_val);
+    Serial.print("   ");
+    Serial.println();
 
   }  
 
@@ -212,91 +253,30 @@ void loop()   // Main loop. Run tasks in an infinite loop.
 
 }
 
-
-inline void disableallactuators()
-{
-    for (motor = 0; motor < NUM_MOTORS; ++motor)
-  {
-    digitalWrite(EN_PINS[motor], LOW);
-  }
-}
-
-inline void enableallactuators()
-{
-    for (motor = 0; motor < NUM_MOTORS; ++motor)
-  {
-    digitalWrite(EN_PINS[motor], HIGH);
-  }
-}
-
-inline void levelplatform()
-{
- 
-}
-
-void currentPosition()
-{
-
-}
-
 inline void readSerial()  //Read serial input and set desired positions.
 { 
-  EthernetClient client = Serial.available();
-  char incomingByte = Serial.read();
-  
-  if (incomingByte == 'A')
-  {
       // Parse ints from serial
     for (motor = 0; motor < NUM_MOTORS; ++motor)
     {
-      input[motor] = Serial.parseInt();
+        input[motor] = Serial.parseInt();
     }
+ 
     // Check that inputs are valid
     for (motor = 0; motor < NUM_MOTORS; ++motor)
     {
-      if (input[motor] > MAX_POS)
-      {
-        return;
-      }
-      else if (input[motor] < MIN_POS)
-      {
-        return;
-      }
+        if (input[motor] < MIN_POS || input[motor] > 600)
+        {
+            return;
+        }
     }
+ 
+    yaw_current_value =   input[0];
+    pitch_current_value = input[1];
+    roll_current_value =  input[2];
+    heave_current_value = input[3];
+    sway_current_value =  input[4];
+    surge_current_value = input[5];
 
-    // Set the input as the desired positions
-    for (motor = 0; motor < NUM_MOTORS; ++motor)
-    {
-      desired_pos[motor] = input[motor];
-      previousMillis[motor] = millis();    
-    }
-  }
-
-  else if (incomingByte == 'Q')
-  {
-    disableallactuators();
-    return;
-  }
-  else if (incomingByte == 'E')
-  {
-    calibrateIMU();
-    return;
-  }
-  else if (incomingByte == 'I')
-  {
-    levelplatform();
-    return;
-  }
-  else if (incomingByte == 'F')
-  {
-    basePosition(client);
-    return;
-  }
-  else if (incomingByte == 'H')
-  {
-    enableallactuators();
-    return;
-  }
 }
 
 inline void calibrateIMU()
@@ -304,17 +284,9 @@ inline void calibrateIMU()
   pitch_corr = 0.0;
   roll_corr = 0.0;
   yaw_corr = 0.0;
-  pitch_corr = pitch_corr + pitch;
-  roll_corr = roll_corr + roll;
-  yaw_corr = yaw_corr + yaw;
-}
-
-void basePosition(EthernetClient client)
-{
-  for (motor = 0; motor < NUM_MOTORS; ++motor)
-  {
-    desired_pos[motor] = 0;
-  }
+  pitch_corr = pitch_corr + pitch_imu;
+  roll_corr = roll_corr + roll_imu;
+  yaw_corr = yaw_corr + yaw_imu;
 }
 
 inline void startup(uint8_t motor)
@@ -332,6 +304,118 @@ inline void startup(uint8_t motor)
     digitalWrite(DIR_B_PINS[motor], LOW);
     analogWrite(PWM_PINS[motor], MIN_PWM);
   }
+}
+
+void euler_to_rotation_matrix(float yaw, float pitch, float roll) {
+    // Convert angles from degrees to radians
+    float yaw_rad = yaw * PI / 180.0;
+    float pitch_rad = pitch * PI / 180.0;
+    float roll_rad = roll * PI / 180.0;
+
+    // Define rotation matrices
+    float yaw_matrix[3][3] = {
+        {cos(yaw_rad), -sin(yaw_rad), 0},
+        {sin(yaw_rad), cos(yaw_rad), 0},
+        {0, 0, 1}
+    };
+
+    float pitch_matrix[3][3] = {
+        {cos(pitch_rad), 0, sin(pitch_rad)},
+        {0, 1, 0},
+        {-sin(pitch_rad), 0, cos(pitch_rad)}
+    };
+
+    float roll_matrix[3][3] = {
+        {1, 0, 0},
+        {0, cos(roll_rad), -sin(roll_rad)},
+        {0, sin(roll_rad), cos(roll_rad)}
+    };
+
+    // Temporary matrix to store intermediate multiplication results
+    float temp_matrix[3][3];
+
+    // Perform matrix multiplication: yaw_matrix * pitch_matrix
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            temp_matrix[i][j] = 0;
+            for (int k = 0; k < 3; k++) {
+                temp_matrix[i][j] += yaw_matrix[i][k] * pitch_matrix[k][j];
+            }
+        }
+    }
+
+    // Perform matrix multiplication: temp_matrix * roll_matrix
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            rotation_matrix[i][j] = 0;
+            for (int k = 0; k < 3; k++) {
+                rotation_matrix[i][j] += temp_matrix[i][k] * roll_matrix[k][j];
+            }
+        }
+    }
+
+}
+
+void update_platform() {
+    float pitch = pitch_current_value;
+    float yaw = yaw_current_value;
+    float roll = roll_current_value;
+    float heave = heave_current_value;
+    float sway = sway_current_value;
+    float surge = surge_current_value;
+
+    euler_to_rotation_matrix(yaw, pitch, roll);
+
+    float transformation_matrix[4][4] = {0};
+    // Copy rotation matrix to transformation matrix
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            transformation_matrix[i][j] = rotation_matrix[i][j];
+        }
+    }
+    // Add translation components
+    transformation_matrix[0][3] = surge;
+    transformation_matrix[1][3] = sway;
+    transformation_matrix[2][3] = heave;
+    transformation_matrix[3][3] = 1;
+
+    float platform_joints_transformed[6][3]; // Assuming 6 platform joints
+    // Transform platform joints
+    for (int i = 0; i < 6; i++) {
+        for (int j = 0; j < 4; j++) {
+            platform_joints_transformed[i][j] = 0;
+            for (int k = 0; k < 4; k++) {
+                platform_joints_transformed[i][j] += transformation_matrix[j][k] * platform_joints[i][k];
+            }
+            if (j == 2) {
+                platform_joints_transformed[i][j] += 788.2;
+            }
+        }
+    }
+
+    float actuator_lengths[6];
+    // Calculate actuators' lengths
+    for (int i = 0; i < 6; i++) {
+        float x = platform_joints_transformed[i][0] - base_joints[i][0];
+        float y = platform_joints_transformed[i][1] - base_joints[i][1];
+        float z = platform_joints_transformed[i][2] - base_joints[i][2];
+        actuator_lengths[i] = sqrt(x*x + y*y + z*z) - 832.26;
+        // Further processing of actuator lengths (interpolation, absolute value) can be done here
+    }
+
+    for (int i = 0; i < 6; i++) {
+      actuator_lengths[i] = (int)actuator_lengths[i];
+      desired_pos[i] = actuator_lengths[i];
+    }
+
+
+/*
+    for (int i = 0; i < 6; i++) {
+        Serial.print (actuator_lengths[i]); 
+        Serial.print("  ");
+    }
+    Serial.println();
+*/
 }
 
 
@@ -353,6 +437,8 @@ inline void move(uint8_t motor)
     }
 
     total_diff[motor] = abs(desired_pos[motor] = pos[motor]);
+    move_times[motor] = map(total_diff[motor], MIN_POS, MAX_POS, MIN_MOVE_TIME, MAX_MOVE_TIME);
+
     pos_converted[motor] = map(pos[motor], MIN_POS, MAX_POS, MIN_MOVE_TIME, MAX_MOVE_TIME);
 
 
@@ -375,11 +461,6 @@ inline void move(uint8_t motor)
         digitalWrite(DIR_B_PINS[motor], LOW);
         analogWrite(PWM_PINS[motor], MAX_PWM);
     }
-
-  
-
-    move_times[motor] = map(total_diff[motor], MIN_POS, MAX_POS, MIN_MOVE_TIME, MAX_MOVE_TIME);
-  
   
     currentMillis = millis();
 
