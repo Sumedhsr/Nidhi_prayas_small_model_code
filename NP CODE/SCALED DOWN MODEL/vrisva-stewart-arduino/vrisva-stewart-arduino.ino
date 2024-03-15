@@ -100,7 +100,8 @@ int16_t pos_buffer[NUM_MOTORS];
 int16_t input[NUM_MOTORS];          // intermediate input retrieved from the serial buffer
 long desired_pos[NUM_MOTORS];   // desired (user-inputted and validated) position of each actuator
 long total_diff[NUM_MOTORS];     // cumulative position difference for each actuator; for integral gain
-int16_t actuator_state[NUM_MOTORS];
+int16_t actuator_state[NUM_MOTORS] = {0};
+unsigned long delay_time[NUM_MOTORS];
 const int16_t rate_of_pos_change = 2;
 
 // Time variables (for printing)
@@ -112,14 +113,14 @@ uint8_t motor;                      // used to iterate through actuators by thei
 
 //IMU Variables
 float roll_imu       = 0.0;
-float roll_corr  = 0.0;
-float roll_val   = 0.0;
+float roll_corr      = 0.0;
+float roll_val       = 0.0;
 float pitch_imu      = 0.0;
-float pitch_corr = 0.0;
-float pitch_val  = 0.0;
+float pitch_corr     = 0.0;
+float pitch_val      = 0.0;
 float yaw_imu        = 0.0;
-float yaw_corr   = 0.0;
-float yaw_val    = 0.0;
+float yaw_corr       = 0.0;
+float yaw_val        = 0.0;
 float X; 
 float Y;
 float Z;
@@ -132,25 +133,25 @@ float heave_current_value, sway_current_value, surge_current_value;
 float rotation_matrix[3][3];
 
 float base_joints[MAX_JOINTS][COORDINATES] = {
-    {407,  -80,  0, 1},
-    {-135, -393, 0, 1},
-    {-273, -313, 0, 1},
-    {-273,  313, 0, 1},
-    {-135,  393, 0, 1},
-    {407,   80,  0, 1}
+    {180,  -65,  0, 1},
+    {-34, -188, 0, 1},
+    {-146, -123, 0, 1},
+    {-146,  123, 0, 1},
+    {-34,  188, 0, 1},
+    {180,   65,  0, 1}
 };
 
 float platform_joints[MAX_JOINTS][COORDINATES] = 
-    {{152,  -166, 0, 1},
-     {68,   -215, 0, 1},
-     {-220, -49,  0, 1},
-     {-220,  49,  0, 1},
-     {68,    215, 0, 1},
-     {152,   166, 0, 1}};
+    {{108,  -95, 0, 1},
+     {28,   -141, 0, 1},
+     {-137, -46,  0, 1},
+     {-137,  46,  0, 1},
+     {28,    141, 0, 1},
+     {108,   95, 0, 1}};
 
 void setup() //Runs once at initialization; set up input and output pins and variables.
 { 
-  // Initialize pins
+    // Initialize pins
     for (motor = 0; motor < NUM_MOTORS; ++motor)
     {
       // We ae setting up the motor direction pins as output and then setting them as LOW
@@ -166,6 +167,7 @@ void setup() //Runs once at initialization; set up input and output pins and var
 
       // We are setting up all the motor/actuator enable pins as output and setting it to the Value LOW
       pinMode(EN_PINS[motor], OUTPUT);
+      digitalWrite(EN_PINS[motor], HIGH);
 
       // We are setting up the potentiometer pins as input
       pinMode(POT_PINS[motor], INPUT);
@@ -180,16 +182,11 @@ void setup() //Runs once at initialization; set up input and output pins and var
         pwm[motor] = MIN_PWM;
     }
 
-    for (motor = 0; motor < NUM_MOTORS; ++motor)
-    {
-      digitalWrite(EN_PINS[motor], HIGH);
-    }
-
-    startup(motor);
+    //startup(motor);
 
     // Initialize serial communication
     Serial.begin(BAUD_RATE);
-    
+   /* 
     Wire.begin();
     if (myIMU.begin() == false)
     {
@@ -199,7 +196,7 @@ void setup() //Runs once at initialization; set up input and output pins and var
     Wire.setClock(400000); //Increase I2C data rate to 400kHz
     myIMU.enableRotationVector(50); //Send data update every 50ms
     myIMU.enableLinearAccelerometer(50);
-    
+    */
  }
 
 
@@ -212,9 +209,9 @@ void loop()   // Main loop. Run tasks in an infinite loop.
   if (Serial.available() >= INPUT_TRIGGER)
   {
     readSerial();
+    update_platform();
   }
-  update_platform();
-  
+  /*
   //Look for reports from the IMU
   if (myIMU.dataAvailable() == true)
   {
@@ -239,16 +236,52 @@ void loop()   // Main loop. Run tasks in an infinite loop.
     Serial.println();
 
   }  
+*/
 
+   for (motor = 0; motor < NUM_MOTORS; ++motor)
+   {
+     Serial.print(desired_pos[motor]);
+     Serial.print("   ");
+   }
+   Serial.print("      ");
+   for (motor = 0; motor < NUM_MOTORS; ++motor)
+   {
+     Serial.print(pos[motor]);
+     Serial.print("   ");
+   }
+   Serial.println();
   // For each actuator, set movement parameters (direction, PWM) and execute motion
+  
   for (motor = 0; motor < NUM_MOTORS; ++motor)
   {
-    move(motor);
-  }
-
-  for (motor = 0; motor < NUM_MOTORS; ++motor)
-  {
-    pos[motor] = map(pos_converted[motor], 0, 3500, 0, 50);
+    if (pos[motor] != desired_pos[motor])
+    {
+          //move(motor);
+    if (desired_pos[motor] < pos[motor])
+    {
+      //EXTEND
+      digitalWrite(DIR_A_PINS[motor], LOW);
+      digitalWrite(DIR_B_PINS[motor], HIGH);
+      analogWrite(PWM_PINS[motor], MAX_PWM);
+      delay(delay_time[motor]);
+      Serial.println("ext");
+    }
+    else if (desired_pos[motor] > pos[motor])
+    {
+      //RETRACT
+      digitalWrite(DIR_A_PINS[motor], HIGH);
+      digitalWrite(DIR_B_PINS[motor], LOW);
+      analogWrite(PWM_PINS[motor], MAX_PWM);
+      delay(delay_time[motor]);
+      Serial.println("ret");
+    }
+    pos[motor] = desired_pos[motor];
+    analogWrite(PWM_PINS[motor], 0);
+    }
+    else
+    {
+      Serial.println("idle");
+    }
   }
 
 }
@@ -261,15 +294,6 @@ inline void readSerial()  //Read serial input and set desired positions.
         input[motor] = Serial.parseInt();
     }
  
-    // Check that inputs are valid
-    for (motor = 0; motor < NUM_MOTORS; ++motor)
-    {
-        if (input[motor] < MIN_POS || input[motor] > 600)
-        {
-            return;
-        }
-    }
- 
     yaw_current_value =   input[0];
     pitch_current_value = input[1];
     roll_current_value =  input[2];
@@ -277,6 +301,8 @@ inline void readSerial()  //Read serial input and set desired positions.
     sway_current_value =  input[4];
     surge_current_value = input[5];
 
+    //previous_time = millis();
+    //Serial.print(previous_time);
 }
 
 inline void calibrateIMU()
@@ -293,11 +319,11 @@ inline void startup(uint8_t motor)
 {
   for (motor = 0; motor < NUM_MOTORS; ++motor)
   {
-    digitalWrite(DIR_A_PINS[motor], HIGH);
-    digitalWrite(DIR_B_PINS[motor], LOW);
+    digitalWrite(DIR_A_PINS[motor], LOW);
+    digitalWrite(DIR_B_PINS[motor], HIGH);
     analogWrite(PWM_PINS[motor], MAX_PWM);
   }
-  delay(1000);
+  delay(5000);
   for (motor = 0; motor < NUM_MOTORS; ++motor)
   {
     digitalWrite(DIR_A_PINS[motor], LOW);
@@ -321,7 +347,7 @@ void euler_to_rotation_matrix(float yaw, float pitch, float roll) {
 
     float pitch_matrix[3][3] = {
         {cos(pitch_rad), 0, sin(pitch_rad)},
-        {0, 1, 0},
+         {0, 1, 0},
         {-sin(pitch_rad), 0, cos(pitch_rad)}
     };
 
@@ -399,15 +425,22 @@ void update_platform() {
         float x = platform_joints_transformed[i][0] - base_joints[i][0];
         float y = platform_joints_transformed[i][1] - base_joints[i][1];
         float z = platform_joints_transformed[i][2] - base_joints[i][2];
-        actuator_lengths[i] = sqrt(x*x + y*y + z*z) - 832.26;
+        actuator_lengths[i] = sqrt(x*x + y*y + z*z) - 788.2;
         // Further processing of actuator lengths (interpolation, absolute value) can be done here
     }
 
-    for (int i = 0; i < 6; i++) {
-      actuator_lengths[i] = (int)actuator_lengths[i];
+    for (int i = 0; i < 6; ++i) {
+      actuator_lengths[i] = (int)actuator_lengths[i] - 3;
       desired_pos[i] = actuator_lengths[i];
     }
 
+  for (motor = 0; motor < NUM_MOTORS; ++motor)
+  {
+    //Serial.print(delay_time[motor]);
+    //Serial.print("   ");
+    delay_time[motor] = map(desired_pos[motor], 0, 50, 0, 3500);
+  }
+  //Serial.println();
 
 /*
     for (int i = 0; i < 6; i++) {
@@ -415,52 +448,47 @@ void update_platform() {
         Serial.print("  ");
     }
     Serial.println();
-*/
+    */
 }
 
 
 inline void move(uint8_t motor)
 {
-
-
+/*
     if (pos[motor] > desired_pos[motor])
     {
-      actuator_state[motor] = RETRACT;
+      //EXTEND
+      digitalWrite(DIR_A_PINS[motor], LOW);
+      digitalWrite(DIR_B_PINS[motor], HIGH);
+      analogWrite(PWM_PINS[motor], MAX_PWM);
+      delay(delay_time[motor]);
+      analogWrite(PWM_PINS[motor], 0);
+      pos[motor] = desired_pos[motor];
+
     }
     else if (pos[motor] < desired_pos[motor])
     {
-      actuator_state[motor] = EXTEND;
+      //RETRACT
+      digitalWrite(DIR_A_PINS[motor], HIGH);
+      digitalWrite(DIR_B_PINS[motor], LOW);
+      analogWrite(PWM_PINS[motor], MAX_PWM);
+      delay(delay_time[motor]);
+      analogWrite(PWM_PINS[motor], 0);
+      pos[motor] = desired_pos[motor];
     }
     else
     {
-      actuator_state[motor] = IDLE;
+      //IDLE
+      digitalWrite(DIR_A_PINS[motor], LOW);
+      digitalWrite(DIR_B_PINS[motor], LOW);
+      analogWrite(PWM_PINS[motor], 0);
+      return;
     }
-
+/*
     total_diff[motor] = abs(desired_pos[motor] = pos[motor]);
     move_times[motor] = map(total_diff[motor], MIN_POS, MAX_POS, MIN_MOVE_TIME, MAX_MOVE_TIME);
 
     pos_converted[motor] = map(pos[motor], MIN_POS, MAX_POS, MIN_MOVE_TIME, MAX_MOVE_TIME);
-
-
-    switch (actuator_state[motor]) 
-    {
-      case 0:
-        // Idle state
-        digitalWrite(DIR_A_PINS[motor], LOW);
-        digitalWrite(DIR_B_PINS[motor], LOW);
-        analogWrite(PWM_PINS[motor], 0);
-        break;
-      case 1:
-        // Extend
-        digitalWrite(DIR_A_PINS[motor], LOW);
-        digitalWrite(DIR_B_PINS[motor], HIGH);
-        analogWrite(PWM_PINS[motor], MAX_PWM);
-      case 2:
-        // Retract
-        digitalWrite(DIR_A_PINS[motor], HIGH);
-        digitalWrite(DIR_B_PINS[motor], LOW);
-        analogWrite(PWM_PINS[motor], MAX_PWM);
-    }
   
     currentMillis = millis();
 
@@ -483,5 +511,5 @@ inline void move(uint8_t motor)
         }
       }
     }
-  
+*/
 }

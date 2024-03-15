@@ -1,0 +1,3 @@
+"C:\\Users\\admin\\Desktop\\vrisva\\icons\\icon1.png"
+
+"C:\\Users\\admin\\Desktop\\vrisva\\icons\\reset_icon.png"
