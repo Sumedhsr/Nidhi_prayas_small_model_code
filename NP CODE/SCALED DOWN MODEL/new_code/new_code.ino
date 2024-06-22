@@ -33,7 +33,7 @@
 #define NUM_MOTORS 6
 
 // Actuator value bounds
-#define MIN_POS 0
+#define MIN_POS -50
 #define MAX_POS 50
 #define MIN_PWM 0
 #define MAX_PWM 255
@@ -123,7 +123,7 @@ void loop() {
     update_platform();
     startTime = millis();
   }
-  //down();
+  // down();
   //up();
   move();
 }
@@ -134,9 +134,11 @@ void loop() {
  */
 inline void readSerial()
 {
+
   // Parse ints from serial
   for (motor = 0; motor < NUM_MOTORS; ++motor)
   {
+    pos[motor] = desired_pos[motor];
     input[motor] = Serial.parseInt();
   }
 
@@ -207,24 +209,24 @@ void euler_to_rotation_matrix(float yaw, float pitch, float roll) {
 }
 
 void update_platform() {
-  Serial.print(yaw);   Serial.print("   ");
-  Serial.print(pitch); Serial.print("   ");
-  Serial.print(roll);  Serial.print("   ");
-  Serial.print(heave); Serial.print("   ");
-  Serial.print(sway);  Serial.print("   ");
-  Serial.print(surge); Serial.print("   ");
-  Serial.println();
+  // Serial.print(yaw);   Serial.print("   ");
+  // Serial.print(pitch); Serial.print("   ");
+  // Serial.print(roll);  Serial.print("   ");
+  // Serial.print(heave); Serial.print("   ");
+  // Serial.print(sway);  Serial.print("   ");
+  // Serial.print(surge); Serial.print("   ");
+  // Serial.println();
 
   euler_to_rotation_matrix(yaw, pitch, roll);
 
-  // Print the matrix to the Serial Monitor
-  for (int i = 0; i < 3; i++) { // Iterate over rows
-    for (int j = 0; j < 3; j++) { // Iterate over columns
-      Serial.print(rotation_matrix[i][j]);
-      Serial.print(" "); // Print a space between numbers
-    }
-    Serial.println(); // Move to the next line after printing each row
-  }
+  // // Print the matrix to the Serial Monitor
+  // for (int i = 0; i < 3; i++) { // Iterate over rows
+  //   for (int j = 0; j < 3; j++) { // Iterate over columns
+  //     Serial.print(rotation_matrix[i][j]);
+  //     Serial.print(" "); // Print a space between numbers
+  //   }
+  //   Serial.println(); // Move to the next line after printing each row
+  // }
 
   float transformation_matrix[4][4] = {0};
   // Copy rotation matrix to transformation matrix
@@ -253,16 +255,6 @@ void update_platform() {
     }
   }
 
-  Serial.println();
-  // Print the matrix to the Serial Monitor
-  for (int i = 0; i < 6; i++) { // Iterate over rows
-    for (int j = 0; j < 4; j++) { // Iterate over columns
-      Serial.print(platform_joints_transformed[i][j]);
-      Serial.print(" "); // Print a space between numbers
-    }
-    Serial.println(); // Move to the next line after printing each row
-  }
-
   float actuator_lengths[6];
   // Calculate actuators' lengths
   for (int i = 0; i < 6; ++i) {
@@ -279,7 +271,7 @@ void update_platform() {
   {
     desired_pos[motor] = actuator_lengths[motor];
     pos_diff[motor] = abs(desired_pos[motor] - pos[motor]);  // reset integral feedback given a new target
-    delay_times[motor] = map(pos_diff[motor], 0, 50, 0, 3400);
+    delay_times[motor] = map(pos_diff[motor], 0, 50, 0, 3300);
   }
 
   for (motor = 0; motor < NUM_MOTORS; ++motor)
